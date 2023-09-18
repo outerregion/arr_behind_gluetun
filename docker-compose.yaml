@@ -1,0 +1,243 @@
+---
+version: "3"
+services:
+  vpn:
+    image: qmcgaw/gluetun
+    container_name: vpn
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - $Proxy:8888/tcp # HTTP proxy
+      - $ShadowsocksTCP:8388/tcp # Shadowsocks
+      - $ShadowsocksUDP:8388/udp # Shadowsocks
+      - $QbittorrentUI:8090 # qbittorrent Web UI
+      - $Qbittorrent:6881 # qbittorrent
+      - $QbittorrentUDP:6881/udp # qbittorrent
+      - $GluetunShadowsocksUDP:8389/udp # Gluetun-Shadowsocks?
+      - $GluetunShadowsocksTCP:8389/tcp # Gluetun-Shadowsocks?
+      - $GluetunPort:8889/tcp # Gluetun
+      - $ProwlerPort:9696 # prowlarr
+      - $JacketPort:9117 # jackett
+      - $SonarPort:8989 # sonarr
+      - $RadarrPort:7878 # radarr
+      - $LidarrPort:8686 # lidarr
+      - $LLPort:5299 # Lazylibrarian
+      - $ReadarrPort:8787 # Readarr
+      - $FirefoxPort:3000 # Firefox
+      
+    volumes:
+      - /volume1/docker/gluetun:/gluetun
+    environment:
+      #See https://github.com/qdm12/gluetun-wiki
+      - VPN_SERVICE_PROVIDER=private internet access # Set this to your provider https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers
+      - VPN_TYPE=openvpn
+      # OpenVPN:
+      - OPENVPN_USER=$OPENVPN_USER
+      - OPENVPN_PASSWORD=$OPENVPN_PASSWORD
+      - SERVER_REGIONS=CA Vancouver
+      # Timezone for accurate log times
+      - TZ=$TZ
+      - UPDATER_PERIOD=24h
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=$TZ
+      - UMASK=022
+      - WEBUI_PORT=8090
+    volumes:
+      - /volume1/docker/qbittorrent/config:/config
+      - $Downloads/video/Seeding:/downloads
+      - $Downloads/video/Downloads:/tvdownloads
+      - $Downloads/video/FilmDownloads:/filmdownloads
+      - $Downloads/video/MusicDownloads:/musicdownloads
+    network_mode: service:vpn
+    labels:
+      - autoheal=true
+      - "com.centurylinklabs.watchtower.enable=true"
+    healthcheck:
+      test: curl google.com || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+      
+
+  prowlarr:
+    image: hotio/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=1026
+      - PGID=101
+      - TZ=$TZ
+    volumes:
+      - /volume1/docker/prowlarr/config:/config
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    network_mode: service:vpn
+    depends_on:
+      - vpn
+      - qbittorrent
+
+  jackett:
+    image: linuxserver/jackett:latest
+    container_name: vpn-jackett
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=$TZ
+    volumes:
+      - /volume1/docker/jackett/config:/config
+    network_mode: service:vpn
+    labels:
+      - autoheal=true
+      - com.centurylinklabs.watchtower.depends-on=vpn
+      - "com.centurylinklabs.watchtower.enable=true"
+    healthcheck:
+      test: curl google.com || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=$TZ
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /volume1/docker/sonarr/config:/config
+      - /export/molly/tv:/tv
+      - $Downloads/video/Downloads:/downloads
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    network_mode: service:vpn
+    depends_on:
+      - prowlarr
+      - qbittorrent
+      - vpn
+
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=$TZ
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /volume1/docker/radarr3/config:/config
+      - /export/ron/Movies:/movies
+      - $Downloads/video/Downloads:/downloads
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    network_mode: service:vpn
+    depends_on:
+      - prowlarr
+      - qbittorrent
+      - vpn
+
+#-----lidarr
+  lidarr:
+    image: ghcr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    network_mode: service:vpn
+    environment:
+      - PUID=1026
+      - PGID=101
+      - TZ=$TZ
+    volumes:
+      - /volume1/docker/Lidarr/config:/config
+      - /export/ron/music/lidar:/music
+      - /export/ron/music/audiobooks:/audiobooks
+      - $Downloads/video/Downloads:/downloads
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    depends_on:
+      - prowlarr
+      - qbittorrent
+      - vpn
+
+#-----Lazylibrarian
+# This one takes a while to update and run. Check logs if unsure.
+  lazylibrarian:
+    image: ghcr.io/linuxserver/lazylibrarian:latest
+    container_name: lazylibrarian
+    network_mode: service:vpn
+    environment:
+      - PUID=1000
+      - PGID=100
+      - TZ=$TZ
+      - DOCKER_MODS=linuxserver/calibre-web:calibre|linuxserver/mods:lazylibrarian-ffmpeg #optional
+    volumes:
+      - /volume1/docker/Lazylibrarian/data:/config
+      - $Books:/books
+      - $Downloads/books/downloads:/downloads
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  readarr:
+    image: lscr.io/linuxserver/readarr:develop
+    container_name: readarr
+    network_mode: service:vpn
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=$TZ
+    volumes:
+      - /volume1/docker/readarr/config:/config
+      - $Books:/books #optional
+      - $Downloads/books:/downloads #optional
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    depends_on:
+      - prowlarr
+      - qbittorrent
+      - vpn
+
+  watchtower:
+    image: containrrr/watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=$TZ
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+      - WATCHTOWER_SCHEDULE=“0 0 3 * * *” 
+      - WATCHTOWER_ROLLING_RESTART=true
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    
+  # For testing the VPN is working and ability access local ports.  
+  firefox:
+    image: lscr.io/linuxserver/firefox:latest
+    container_name: firefox
+    security_opt:
+      - seccomp:unconfined #optional
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=$TZ
+    volumes:
+      - /volume1/docker/firefox/config:/config
+    network_mode: service:vpn
+    shm_size: "1gb"
+    restart: unless-stopped
